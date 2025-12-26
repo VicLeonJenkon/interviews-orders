@@ -1,19 +1,19 @@
 # src/app.py
-import json
-from pathlib import Path
-from .order_service import process_data
+import uvicorn
+
+from .order_service import app
+
 
 def main():
-    sample_path = Path(__file__).resolve().parent.parent / "data" / "sample_orders.json"
-    if sample_path.exists():
-        items = json.loads(sample_path.read_text())
-    else:
-        items = [{"id": 1, "amount": 100, "priority": False},
-                 {"id": 2, "amount": 50, "priority": True},
-                 {"id": 3, "amount": 0}]
+    """Run the FastAPI server."""
+    uvicorn.run(
+        "src.order_service:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        workers=4,  # Multiple workers to expose threading issues
+    )
 
-    result = process_data(items)
-    print(json.dumps(result, indent=2))
 
 if __name__ == "__main__":
     main()

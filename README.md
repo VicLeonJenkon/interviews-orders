@@ -1,54 +1,111 @@
-# Dragonfly Take‑Home: Orders Mini‑Service (Refactor & Extend)
+# Dragonfly Live Debugging Exercise: Order Processing Service
 
-You are given a tiny service that processes "orders." The current code works but violates
-many good design principles (duplication, weak boundaries, poor naming) and may contain
-one or more bugs.
+You are given an order processing microservice that has two critical bugs affecting production reliability. Your task is to identify and fix these issues while discussing your debugging approach.
 
-## Current Behavior
+## System Overview
 
-- Input: a list of dicts shaped roughly like `{"id": 1, "amount": 100, "priority": False}`.
-- Validation: any order missing `amount`, or with `amount <= 0`, is marked as an `error` while preserving its `id`.
-- Success path: valid orders return `{"id": id, "status": "ok", "priority": <bool>}`.
-- Ordering: business stakeholders expect priority orders (`priority=True`) to surface first
-- CLI demo: `python -m src.app` reads `data/sample_orders.json` (or falls back to inline samples) and prints the processed result.
+This is a FastAPI-based order processing service that:
+- Accepts order requests via REST API
+- Validates order amounts
+- Deducts from customer account balances (via an external balance service)
+- Tracks daily order statistics (revenue and order count)
+- Supports both single orders and batch processing
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/orders` | POST | Process a single order |
+| `/orders/batch` | POST | Process multiple orders |
+| `/stats` | GET | Get daily statistics |
+| `/balance/{customer_id}` | GET | Check customer balance |
+| `/reset` | POST | Reset state (for testing) |
+
+### Example Requests
+
+```bash
+# Create a single order
+curl -X POST http://localhost:8000/orders \
+  -H "Content-Type: application/json" \
+  -d '{"id": 1, "customer_id": 1, "amount": 50.0, "priority": false}'
+
+# Check customer balance
+curl http://localhost:8000/balance/1
+
+# Get statistics
+curl http://localhost:8000/stats
+```
+
+## The Problem
+
+Our QA team has reported intermittent issues in production:
+
+1. **Statistics Discrepancy**: The daily revenue and order count in `/stats` sometimes shows lower numbers than expected. For example, processing 100 orders of $10 each sometimes reports only $800-900 in revenue instead of $1000.
+
+2. **Customer Complaints**: Some customers report being charged twice for a single order, especially during periods of high load or network instability.
 
 ## Your Tasks
 
-1. **Critique the codebase** — capture the key issues you spot before making changes (structure, naming, bugs, tests, etc.).
-2. **Refactor to improve the design** — address the issues you highlighted in your critique.
-3. **Enhance tests** — add/adjust tests to cover edge cases (invalid input, empty list, all priority, all invalid, etc.).  If there are any behaviors that are ambiguous, please note this and make a sensible decision as to the desired behavior.
-4. Keep the simple CLI working (`python -m src.app`) and ensure static type checking passes (`pyright`).
-
-You may restructure files, split modules, and add helpers. Focus on correctness, clarity, and maintainability with proportionate changes.
-
-## Session Rules
-
-- Start a 45-minute timer; aim to get as far as you can within that window.
-- Record a screenshare of your entire desktop for the whole session (no partial window capture).
-- Feel free to use the internet or AI tools—just narrate key lookups or generated snippets so we understand the context.
-- Work in your normal IDE and hardware setup; we want to observe your typical workflow.
+1. **Identify the bugs** — Review the code and explain the root cause of each issue.
+2. **Propose fixes** — Describe how you would fix each bug.
+3. **Implement the fixes** — Make the necessary code changes.
+4. **Verify** — Ensure the tests pass after your fixes.
 
 ## Running the Project
 
-Install deps/build, then run static and runtime checks:
+### Using Docker (Recommended)
 
 ```bash
-docker compose build
+# Build and start the service
+docker compose up --build
+
+# In another terminal, run tests
+docker compose run --rm app pytest -v
+
+# Run type checking
 docker compose run --rm app pyright
-docker compose run --rm app pytest -q
 ```
 
-Run the sample app:
+### Local Development
 
 ```bash
-docker compose run --rm app python -m src.app
+# Install dependencies
+pip install -r requirements.txt
+
+# Start the server
+uvicorn src.order_service:app --host 0.0.0.0 --port 8000 --workers 4
+
+# Run tests
+pytest -v
+
+# Run type checking
+pyright
 ```
 
-## What to Deliver
+### Useful Test Commands
 
-- Your code changes
-- A short critique summary checked into the repo as `CRITIQUE.md`
-- Tests you wrote/updated
-- Confirmation that both `pyright` and `pytest` pass
+```bash
+# Run all tests
+pytest -v
+
+# Run only concurrency tests (these expose the bugs)
+pytest -v tests/test_api.py::TestConcurrency
+
+# Run a specific test
+pytest -v tests/test_api.py::TestConcurrency::test_concurrent_stats_update
+```
+
+## Session Guidelines
+
+- We'll work through this together — feel free to think out loud and ask questions.
+- You can use any debugging tools or techniques you normally would.
+- Focus on understanding the issues before jumping to solutions.
+- Consider both correctness and production-readiness in your fixes.
+
+## Files of Interest
+
+- `src/order_service.py` — Main FastAPI application and order processing logic
+- `src/balance_service.py` — External customer balance service stub
+- `tests/test_api.py` — Test suite including concurrency tests
 
 Good luck!
