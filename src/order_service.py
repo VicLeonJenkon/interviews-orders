@@ -1,5 +1,5 @@
 # src/order_service.py
-import time
+import time, asyncio
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Union
 
@@ -11,6 +11,8 @@ from .balance_service import deduct_balance, get_balance, reset_balances
 app = FastAPI(title="Order Processing Service")
 
 OrderDict = Dict[str, int]
+
+lock = asyncio.Lock()
 
 
 @dataclass
@@ -52,19 +54,15 @@ class StatsResponse(BaseModel):
     total_revenue: float
     order_count: int
 
-
-def _update_daily_stats(amount: float):
+"""Due to a race condition it was necessary to change this code"""
+async def _update_daily_stats(amount: float):
     """Update daily statistics with the order amount."""
-    current_revenue = _daily_stats["total_revenue"]
-    current_count = _daily_stats["order_count"]
+    async with lock:
+        _daily_stats["total_revenue"] += amount
+        _daily_stats["order_count"] += 1    
 
-    time.sleep(0.001)
-
-    _daily_stats["total_revenue"] = current_revenue + amount
-    _daily_stats["order_count"] = current_count + 1
-
-
-def _process_single_order(order: OrderRequest, max_retries: int = 3) -> OrderResponse:
+"""Change to async in order to manage concurrency"""
+async def _process_single_order(order: OrderRequest, max_retries: int = 3) -> OrderResponse:
     """Process a single order: validate, deduct balance, update stats."""
     if order.amount <= 0:
         return OrderResponse(
@@ -87,8 +85,9 @@ def _process_single_order(order: OrderRequest, max_retries: int = 3) -> OrderRes
     for attempt in range(max_retries):
         try:
             result = deduct_balance(order.customer_id, order.amount)
+            
             if result.success:
-                _update_daily_stats(order.amount)
+                await _update_daily_stats(order.amount)
 
                 return OrderResponse(
                     id=order.id,
@@ -114,25 +113,25 @@ def _process_single_order(order: OrderRequest, max_retries: int = 3) -> OrderRes
         message=f"Balance service unavailable after {max_retries} retries: {last_error}"
     )
 
-
+"""Change to async in order to manage concurrency"""
 @app.post("/orders", response_model=OrderResponse)
-def create_order(order: OrderRequest) -> OrderResponse:
+async def create_order(order: OrderRequest) -> OrderResponse:
     """Process a single order."""
-    return _process_single_order(order)
+    return await _process_single_order(order)
 
-
+"""Change to async in order to manage concurrency"""
 @app.post("/orders/batch", response_model=List[OrderResponse])
-def create_orders_batch(request: BatchOrderRequest) -> List[OrderResponse]:
+async def create_orders_batch(request: BatchOrderRequest) -> List[OrderResponse]:
     """
     Process a batch of orders.
     Orders are sorted by priority (priority orders first).
     """
     results = []
     for order in request.orders:
-        result = _process_single_order(order)
+        result = await _process_single_order(order)
         results.append(result)
 
-    results = sorted(results, key=lambda x: x.priority)
+    results = sorted(results, key=lambda x: x.priority, reverse=True)
     return results
 
 
